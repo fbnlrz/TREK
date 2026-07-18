@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const ko: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const ko: NotificationLocale = {
       body: 'Synology 계정 또는 URL이 변경되었습니다. Synology Photos에서 로그아웃되었습니다.',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: '비밀번호 재설정',

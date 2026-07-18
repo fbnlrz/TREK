@@ -3660,6 +3660,47 @@ function runMigrations(db: Database.Database): void {
         console.warn('[migrations] Non-fatal migration step failed:', err);
       }
     },
+
+    // Flight tracker (#flight-tracker). Everything here is derived state that can be
+    // rebuilt from the providers, so the tables are deliberately standalone — no FKs,
+    // no cascade: a deleted reservation just leaves a row nobody ever reads again, and
+    // losing the whole lot costs one extra upstream call per booking.
+    //
+    //  - `flight_tracker_cache`   the last built FlightTrackerPayload per reservation.
+    //    Both providers are 1 req/s free tier, so the trip map and the calendar read
+    //    this cache ONLY and never fan out; the trip_id index is what makes that cheap.
+    //  - `flight_tracker_overrides` the manually entered flight number, when auto
+    //    detection from the booking got it wrong. Empty input deletes the row.
+    //  - `flight_tracker_notif`   the per-(reservation, user) signature of the last
+    //    notified state, so a poll only notifies on an actual change and the first
+    //    poll only records the baseline.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS flight_tracker_cache (
+          reservation_id TEXT PRIMARY KEY,
+          trip_id TEXT,
+          payload TEXT,
+          fetched_at INTEGER
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_flight_tracker_cache_trip ON flight_tracker_cache (trip_id);');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS flight_tracker_overrides (
+          reservation_id TEXT PRIMARY KEY,
+          trip_id TEXT,
+          flight_number TEXT,
+          updated_at INTEGER
+        );
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS flight_tracker_notif (
+          reservation_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          sig TEXT,
+          PRIMARY KEY (reservation_id, user_id)
+        );
+      `);
+    },
   ];
 
   if (currentVersion < migrations.length) {

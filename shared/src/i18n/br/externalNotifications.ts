@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const br: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const br: NotificationLocale = {
       body: 'Sua conta ou URL do Synology foi alterada. Você foi desconectado do Synology Photos.',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: 'Redefinir sua senha',

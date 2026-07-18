@@ -61,6 +61,9 @@ const RESET_TABLES = [
   'trip_files',
   'photos',
   // Reservations
+  'flight_tracker_cache',
+  'flight_tracker_overrides',
+  'flight_tracker_notif',
   'reservation_day_positions',
   'reservations',
   // Accommodations & days

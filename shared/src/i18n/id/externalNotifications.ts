@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const id: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const id: NotificationLocale = {
       body: 'Akun atau URL Synology Anda berubah. Anda telah keluar dari Synology Photos.',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: 'Setel ulang kata sandi Anda',

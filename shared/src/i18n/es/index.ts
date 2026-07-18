@@ -11,6 +11,7 @@ import dashboard from './dashboard';
 import day from './day';
 import dayplan from './dayplan';
 import files from './files';
+import flightTracker from './flightTracker';
 import help from './help';
 import inspector from './inspector';
 import journey from './journey';
@@ -86,5 +87,6 @@ const locale = {
   ...system_notice,
   ...transport,
   ...help,
+  ...flightTracker,
 };
 export default locale;

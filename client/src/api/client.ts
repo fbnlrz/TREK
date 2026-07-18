@@ -44,6 +44,8 @@ import {
   type BookingImportPreviewResponse,
   type BookingImportConfirmResponse,
   type BookingImportMode,
+  type AirlineSuggestion,
+  type FlightTrackerPayload,
 } from '@trek/shared'
 import { getSocketId } from './websocket'
 import { probeNow } from '../sync/connectivity'
@@ -560,6 +562,11 @@ export const adminApi = {
   checkVersion: () => apiClient.get('/admin/version-check').then(r => r.data),
   getBagTracking: () => apiClient.get('/admin/bag-tracking').then(r => r.data),
   updateBagTracking: (enabled: boolean) => apiClient.put('/admin/bag-tracking', { enabled }).then(r => r.data),
+  // AeroDataBox key for the flight tracker. The key itself is never sent back to
+  // the client — only whether one is configured — so the field stays write-only.
+  getFlightTracker: (): Promise<{ hasKey: boolean }> => apiClient.get('/admin/flight-tracker').then(r => r.data),
+  updateFlightTracker: (key: string): Promise<{ hasKey: boolean }> =>
+    apiClient.put('/admin/flight-tracker', { aerodatabox_key: key }).then(r => r.data),
   getPlacesPhotos: () => apiClient.get('/admin/places-photos').then(r => r.data),
   updatePlacesPhotos: (enabled: boolean) => apiClient.put('/admin/places-photos', { enabled }).then(r => r.data),
   getPlacesAutocomplete: () => apiClient.get('/admin/places-autocomplete').then(r => r.data),
@@ -821,6 +828,27 @@ export const mapsApi = {
 export const airportsApi = {
   search: (q: string, signal?: AbortSignal) => apiClient.get('/airports/search', { params: { q }, signal }).then(r => r.data),
   byIata: (iata: string) => apiClient.get(`/airports/${encodeURIComponent(iata)}`).then(r => r.data),
+}
+
+export const airlinesApi = {
+  search: (q: string, limit?: number, signal?: AbortSignal): Promise<AirlineSuggestion[]> =>
+    apiClient.get('/airlines/search', { params: { q, limit }, signal }).then(r => r.data),
+}
+
+// Live flight status for a flight reservation. `status` serves the cached payload
+// (and refreshes it when the TTL for the booking's phase has expired), `refresh`
+// forces a rebuild, and `setNumber` pins a flight number — an empty string clears
+// the override so the number is detected from the booking again. `tripStatus` is
+// cache-only and feeds the trip map, so it never triggers an outbound call.
+export const flightTrackerApi = {
+  status: (tripId: number | string, reservationId: number | string): Promise<FlightTrackerPayload> =>
+    apiClient.get(`/trips/${tripId}/reservations/${reservationId}/flight-status`).then(r => r.data),
+  refresh: (tripId: number | string, reservationId: number | string): Promise<FlightTrackerPayload> =>
+    apiClient.post(`/trips/${tripId}/reservations/${reservationId}/flight-status/refresh`).then(r => r.data),
+  setNumber: (tripId: number | string, reservationId: number | string, flightNumber: string): Promise<FlightTrackerPayload> =>
+    apiClient.post(`/trips/${tripId}/reservations/${reservationId}/flight-status/number`, { flightNumber }).then(r => r.data),
+  tripStatus: (tripId: number | string): Promise<Record<string, FlightTrackerPayload>> =>
+    apiClient.get(`/trips/${tripId}/flight-status`).then(r => r.data),
 }
 
 export const budgetApi = {

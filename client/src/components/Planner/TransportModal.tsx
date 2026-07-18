@@ -5,6 +5,7 @@ import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import AirportSelect, { type Airport } from './AirportSelect'
+import AirlineSelect from './AirlineSelect'
 import LocationSelect, { type LocationPoint } from './LocationSelect'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
@@ -756,7 +757,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <label className={labelClass}>{t('reservations.meta.airline')}</label>
-                            <input type="text" value={wp.airline} onChange={e => updateWp({ airline: e.target.value })} placeholder="Lufthansa" className={inputClass} />
+                            <AirlineSelect value={wp.airline} onChange={v => updateWp({ airline: v })} />
                           </div>
                           <div>
                             <label className={labelClass}>{t('reservations.meta.flightNumber')}</label>

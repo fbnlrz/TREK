@@ -28,6 +28,7 @@ import type {
 } from './types';
 
 export * from './types';
+export * from './flightStatus';
 
 const LOCALES = {
   en,

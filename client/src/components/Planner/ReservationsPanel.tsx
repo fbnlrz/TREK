@@ -21,6 +21,7 @@ import type { ViewContribution } from '../../api/client'
 import { usePluginViewContributions, PluginCardFooter } from '../Plugins/PluginContributions'
 import { usePluginStore, type ActivePlugin } from '../../store/pluginStore'
 import PluginFrame from '../Plugins/PluginFrame'
+import FlightTrackerPanel from './FlightTracker/FlightTrackerPanel'
 import { splitReservationDateTime, formatTime } from '../../utils/formatters'
 
 interface AssignmentLookupEntry {
@@ -415,6 +416,13 @@ function ReservationCard({ r, tripId, onEdit, onDelete, files = [], onNavigateTo
       </div>
 
       <PluginCardFooter items={contributions} tripId={tripId} />
+
+      {/* Live flight status — the panel renders itself away for every other type. */}
+      {r.type === 'flight' && (
+        <div style={{ padding: '0 14px 14px' }}>
+          <FlightTrackerPanel tripId={tripId} reservationId={r.id} reservationType={r.type} />
+        </div>
+      )}
 
       {/* Reservation-detail plugin slots: sandboxed, scoped to this reservation. */}
       {detailPlugins.length > 0 && (

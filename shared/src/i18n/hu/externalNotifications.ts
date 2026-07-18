@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const hu: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const hu: NotificationLocale = {
       body: 'A Synology fiókja vagy URL-je megváltozott. Kijelentkeztek a Synology Photos-ból.',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: 'Jelszó visszaállítása',

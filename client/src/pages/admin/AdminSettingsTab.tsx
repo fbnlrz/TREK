@@ -1,7 +1,7 @@
 import React from 'react'
 import { adminApi, authApi } from '../../api/client'
 import { getApiErrorMessage } from '../../types'
-import { Eye, EyeOff, Save, CheckCircle, XCircle, Loader2, Sun, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Eye, EyeOff, Save, CheckCircle, XCircle, Loader2, Sun, RefreshCw, AlertTriangle, Plane } from 'lucide-react'
 import type { TranslationFn } from '../../types'
 import type { useAdmin } from './useAdmin'
 
@@ -27,6 +27,7 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
     webauthnRpId, setWebauthnRpId, webauthnOrigins, setWebauthnOrigins, savingWebauthn, handleSaveWebauthn,
     allowedFileTypes, setAllowedFileTypes, savingFileTypes, setSavingFileTypes,
     mapsKey, setMapsKey, unsplashKey, setUnsplashKey, showKeys, savingKeys, validating, validation,
+    flightTrackerHasKey, aerodataboxKey, setAerodataboxKey, savingAerodataboxKey, handleSaveAerodataboxKey,
     setShowRotateJwtModal,
     handleToggleAuthSetting, handleToggleRequireMfa,
     toggleKey, handleSaveApiKeys, handleValidateKey,
@@ -326,6 +327,57 @@ export default function AdminSettingsTab({ admin, t }: AdminSettingsTabProps): R
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-1">{t('admin.unsplashKeyHint')}</p>
+          </div>
+
+          {/* AeroDataBox Key (flight tracker) — saved on its own endpoint, since the
+              key is stored encrypted and is never read back to the client. */}
+          <div className="pt-4 border-t border-slate-100">
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+              <Plane className="w-4 h-4 text-slate-400" />
+              {t('flightTracker.admin.keyLabel')}
+            </label>
+            <p className="text-xs text-slate-400 mb-1.5">{t('flightTracker.admin.hint')}</p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showKeys.aerodatabox ? 'text' : 'password'}
+                  value={aerodataboxKey}
+                  onChange={e => setAerodataboxKey(e.target.value)}
+                  placeholder={flightTrackerHasKey ? t('flightTracker.admin.keyReplace') : t('flightTracker.admin.keyPlaceholder')}
+                  className="w-full pr-10 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleKey('aerodatabox')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showKeys.aerodatabox ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <button
+                onClick={() => handleSaveAerodataboxKey(aerodataboxKey)}
+                aria-label={`${t('common.save')} — ${t('flightTracker.admin.keyLabel')}`}
+                disabled={savingAerodataboxKey || !aerodataboxKey.trim()}
+                className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {savingAerodataboxKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {t('common.save')}
+              </button>
+              {flightTrackerHasKey && (
+                <button
+                  onClick={() => handleSaveAerodataboxKey('')}
+                  disabled={savingAerodataboxKey}
+                  className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {t('flightTracker.admin.keyRemove')}
+                </button>
+              )}
+            </div>
+            <p className={`text-xs mt-1 flex items-center gap-1 ${flightTrackerHasKey ? 'text-emerald-600' : 'text-slate-400'}`}>
+              <span className={`w-2 h-2 rounded-full inline-block ${flightTrackerHasKey ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+              {flightTrackerHasKey ? t('flightTracker.admin.keyActive') : t('flightTracker.admin.keyNotSet')}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">{t('flightTracker.admin.keyHelp')}</p>
           </div>
 
           {/* Place Photos Toggle */}

@@ -2,10 +2,10 @@ import { db } from '../db/database';
 import { decrypt_api_key, maybe_encrypt_api_key } from './apiKeyCrypto';
 import { normalizeAppearance } from '@trek/shared';
 
-const ENCRYPTED_SETTING_KEYS = new Set(['webhook_url', 'ntfy_token', 'mapbox_access_token', 'llm_api_key']);
+const ENCRYPTED_SETTING_KEYS = new Set(['webhook_url', 'ntfy_token', 'mapbox_access_token', 'llm_api_key', 'aerodatabox_api_key']);
 // Encrypted keys that are masked (••••••••) when returned to the client.
 // Keys not in this set but in ENCRYPTED_SETTING_KEYS are decrypted and returned.
-const MASKED_SETTING_KEYS = new Set(['webhook_url', 'ntfy_token', 'llm_api_key']);
+const MASKED_SETTING_KEYS = new Set(['webhook_url', 'ntfy_token', 'llm_api_key', 'aerodatabox_api_key']);
 
 export const DEFAULTABLE_USER_SETTING_KEYS = [
   'temperature_unit',

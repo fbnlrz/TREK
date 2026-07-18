@@ -7,6 +7,7 @@ import { AdminGuard } from '../auth/admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { writeAudit, getClientIp, logInfo } from '../../services/auditLog';
 import { send as sendNotification } from '../../services/notificationService';
+import { getFlightTrackerConfig, setFlightTrackerKey } from '../flight-tracker/flight-tracker-key';
 import type { User } from '../../types';
 
 /** Throw the legacy {error,status} envelope when a service call reports failure. */
@@ -339,6 +340,23 @@ export class AdminController {
     } catch (err) {
       throw new HttpException({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
+  }
+
+  // ── Flight tracker (AeroDataBox key) ──
+  // The key is write-only from here on: it goes in encrypted and the GET only
+  // ever reports whether one is set, so an admin session can never read back a
+  // credential the instance holds (same stance as the masked user settings).
+  @Get('flight-tracker')
+  getFlightTracker() { return getFlightTrackerConfig(); }
+
+  @Put('flight-tracker')
+  updateFlightTracker(@CurrentUser() user: User, @Body() body: { aerodatabox_key?: unknown }, @Req() req: Request) {
+    if (body.aerodatabox_key !== undefined && typeof body.aerodatabox_key !== 'string') {
+      throw new HttpException({ error: 'aerodatabox_key must be a string' }, 400);
+    }
+    const result = setFlightTrackerKey(String(body.aerodatabox_key ?? ''));
+    writeAudit({ userId: user.id, action: 'admin.flight_tracker_key', ip: getClientIp(req), details: { hasKey: result.hasKey } });
+    return result;
   }
 
   // ── Dev-only: test notification (404 outside development, mirroring the conditional mount) ──

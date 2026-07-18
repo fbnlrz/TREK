@@ -33,7 +33,8 @@ export type NotificationEventKey =
   | 'packing_tagged'
   | 'version_available'
   | 'synology_session_cleared'
-  | 'plugin_notification';
+  | 'plugin_notification'
+  | 'flight_status_change';
 
 export interface NotificationLocale {
   email: EmailStrings;

@@ -6,6 +6,11 @@ import { Plane, Train, Ship, Car, Bus, Sailboat, Bike, CarTaxiFront, Route, Tram
 import { escapeHtml } from '@trek/shared'
 import { getTransitMapSegments, type TransitMapSegment } from './transitGeometry'
 import { geodesicArcs } from './flightGeodesy'
+import {
+  LIVE_FLIGHT_COLOR, LIVE_REMAINING_COLOR, PLANE_MARKER_PX,
+  mapLiveLegsToSegments, planeMarkerHtml, splitArcAtPosition, useTripLiveFlights,
+  type LiveFlightLeg,
+} from './liveFlights'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { Reservation, ReservationEndpoint } from '../../types'
 
@@ -61,6 +66,16 @@ function endpointIcon(type: TransportType, label: string | null): L.DivIcon {
     iconSize: [estWidth, 22],
     iconAnchor: [estWidth / 2, 11],
     popupAnchor: [0, -11],
+  })
+}
+
+function planeIcon(leg: LiveFlightLeg): L.DivIcon {
+  return L.divIcon({
+    className: 'trek-live-flight-marker',
+    html: planeMarkerHtml(leg.track, leg.label),
+    iconSize: [PLANE_MARKER_PX, PLANE_MARKER_PX],
+    iconAnchor: [PLANE_MARKER_PX / 2, PLANE_MARKER_PX / 2],
+    popupAnchor: [0, -PLANE_MARKER_PX / 2],
   })
 }
 
@@ -122,13 +137,24 @@ function computeDuration(from: ReservationEndpoint, to: ReservationEndpoint, fal
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
+/**
+ * One drawable polyline plus the waypoint segment (waypoint i → i+1) it came
+ * from. The segment index lets the live-flight overlay swap out exactly the
+ * arc an airborne leg belongs to; `geodesicArcs` can return two copies for one
+ * segment (antimeridian wrap), so the index is not unique.
+ */
+interface LegArc {
+  segment: number
+  coords: [number, number][]
+}
+
 interface TransportItem {
   res: Reservation
   from: ReservationEndpoint
   to: ReservationEndpoint
   waypoints: ReservationEndpoint[]
   type: TransportType
-  arcs: [number, number][][]
+  arcs: LegArc[]
   transitSegs: TransitMapSegment[]
   primaryArc: [number, number][]
   fallback: [number, number]
@@ -338,7 +364,7 @@ export default function ReservationOverlay({ reservations, showConnections, show
       const type = r.type as TransportType
       const isGeo = TYPE_META[type].geodesic
       // One arc per leg (between consecutive waypoints), concatenated.
-      const arcs: [number, number][][] = []
+      const arcs: LegArc[] = []
       let distanceKm = 0
       for (let i = 0; i < waypoints.length - 1; i++) {
         const a = waypoints[i]
@@ -346,11 +372,11 @@ export default function ReservationOverlay({ reservations, showConnections, show
         const segArcs = isGeo
           ? geodesicArcs([a.lat, a.lng], [b.lat, b.lng], true)
           : [[[a.lat, a.lng], [b.lat, b.lng]] as [number, number][]]
-        arcs.push(...segArcs)
+        arcs.push(...segArcs.map(coords => ({ segment: i, coords })))
         distanceKm += haversineKm([a.lat, a.lng], [b.lat, b.lng])
       }
-      const primaryIdx = arcs.reduce((best, seg, idx, all) => seg.length > all[best].length ? idx : best, 0)
-      const primaryArc = arcs[primaryIdx] ?? []
+      const primaryIdx = arcs.reduce((best, seg, idx, all) => seg.coords.length > all[best].coords.length ? idx : best, 0)
+      const primaryArc = arcs[primaryIdx]?.coords ?? []
       const fallback: [number, number] = primaryArc.length > 0
         ? (primaryArc[Math.floor(primaryArc.length / 2)] ?? [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2])
         : [(from.lat + to.lat) / 2, (from.lng + to.lng) / 2]
@@ -389,6 +415,36 @@ export default function ReservationOverlay({ reservations, showConnections, show
     return set
   }, [visibleItems, zoom, map])
 
+  // ── live flights ─────────────────────────────────────────────────────
+  // Flights only: poll the trip's cached flight status while the map is
+  // mounted and at least one flight booking is on it. Every reservation on a
+  // trip map belongs to the same trip, so the id comes straight off the data.
+  const flightTripId = useMemo(() => {
+    const flight = items.find(item => item.type === 'flight')
+    return typeof flight?.res.trip_id === 'number' ? flight.res.trip_id : null
+  }, [items])
+  const liveLegs = useTripLiveFlights(flightTripId, showConnections && flightTripId != null)
+
+  // reservation id → waypoint segment index → airborne leg
+  const liveByReservation = useMemo(() => {
+    const out = new Map<number, Map<number, LiveFlightLeg>>()
+    if (liveLegs.length === 0) return out
+    const byRes = new Map<number, LiveFlightLeg[]>()
+    for (const leg of liveLegs) {
+      const list = byRes.get(leg.reservationId)
+      if (list) list.push(leg)
+      else byRes.set(leg.reservationId, [leg])
+    }
+    for (const item of items) {
+      if (item.type !== 'flight') continue
+      const legs = byRes.get(item.res.id)
+      if (!legs?.length) continue
+      const segments = mapLiveLegsToSegments(item.waypoints.map(w => w.code), legs)
+      if (segments.size > 0) out.set(item.res.id, segments)
+    }
+    return out
+  }, [items, liveLegs])
+
   if (!showConnections) return null
 
   return (
@@ -414,18 +470,64 @@ export default function ReservationOverlay({ reservations, showConnections, show
         }
         // Prefer the real road route (car/bus/taxi/bicycle) over the straight arc.
         const road = roadRoutes?.get(item.res.id)
-        const lines = road && road.length >= 2 ? [road] : item.arcs
-        return lines.map((seg, segIdx) => (
-          <Polyline
-            key={`line-${item.res.id}-${segIdx}`}
-            positions={seg}
-            pathOptions={{
-              color: TYPE_META[item.type].color,
-              weight: 2.5,
-              opacity: item.res.status === 'confirmed' ? 0.75 : 0.55,
-              dashArray: item.res.status === 'confirmed' ? undefined : '6, 6',
-            }}
-          />
+        const lines: LegArc[] = road && road.length >= 2 ? [{ segment: -1, coords: road }] : item.arcs
+        const live = liveByReservation.get(item.res.id)
+        return lines.map((seg, segIdx) => {
+          // An airborne leg replaces its own arc with a flown/remaining pair.
+          const leg = live?.get(seg.segment)
+          const split = leg ? splitArcAtPosition(seg.coords, leg.position) : null
+          if (split) {
+            return (
+              <Fragment key={`line-${item.res.id}-${segIdx}`}>
+                {split.remaining.length >= 2 && (
+                  <Polyline
+                    positions={split.remaining}
+                    pathOptions={{ color: LIVE_REMAINING_COLOR, weight: 2.5, opacity: 0.7, dashArray: '5, 6', lineCap: 'round' }}
+                  />
+                )}
+                {split.flown.length >= 2 && (
+                  <Polyline
+                    positions={split.flown}
+                    pathOptions={{ color: LIVE_FLIGHT_COLOR, weight: 3, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }}
+                  />
+                )}
+              </Fragment>
+            )
+          }
+          return (
+            <Polyline
+              key={`line-${item.res.id}-${segIdx}`}
+              positions={seg.coords}
+              pathOptions={{
+                color: TYPE_META[item.type].color,
+                weight: 2.5,
+                opacity: item.res.status === 'confirmed' ? 0.75 : 0.55,
+                dashArray: item.res.status === 'confirmed' ? undefined : '6, 6',
+              }}
+            />
+          )
+        })
+      })}
+
+      {/* Live aircraft, rotated to the reported ADS-B track. */}
+      {visibleItems.flatMap(item => {
+        const live = liveByReservation.get(item.res.id)
+        if (!live) return []
+        return [...live.values()].map(leg => (
+          <Marker
+            key={`live-${item.res.id}-${leg.legIndex}`}
+            position={leg.position}
+            icon={planeIcon(leg)}
+            pane={ENDPOINT_PANE}
+            zIndexOffset={1200}
+            eventHandlers={{ click: () => onEndpointClick?.(item.res.id) }}
+          >
+            {leg.label && (
+              <Tooltip direction="top" offset={[0, -10]} opacity={1} className="map-tooltip">
+                <div style={{ fontWeight: 600, fontSize: 12 }}>{leg.label}</div>
+              </Tooltip>
+            )}
+          </Marker>
         ))
       })}
 

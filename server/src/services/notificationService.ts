@@ -22,6 +22,12 @@ interface EventNotifConfig {
   inAppType: 'simple' | 'navigate';
   titleKey: string;
   textKey: string;
+  /**
+   * Per-send override of `textKey`, for events whose wording depends on WHICH
+   * change fired (the flight tracker's cancelled/delayed/gate-moved variants).
+   * Falls back to `textKey` when absent or when it returns nothing.
+   */
+  textKeyFor?: (params: Record<string, string>) => string | null | undefined;
   navigateTextKey?: string;
   navigateTarget: (params: Record<string, string>) => string | null;
 }
@@ -134,6 +140,18 @@ const EVENT_NOTIFICATION_CONFIG: Record<string, EventNotifConfig> = {
     textKey: 'notifications.synologySessionCleared.text',
     navigateTarget: () => null,
   },
+  // Flight tracker (#flight-tracker). One booking can change in several ways
+  // (cancelled / diverted / delayed / gate moved), and each reads as a different
+  // sentence, so the concrete text key travels in `changeKey` and `textKeyFor`
+  // picks it up — `textKey` stays as the neutral fallback.
+  flight_status_change: {
+    inAppType: 'navigate',
+    titleKey: 'flightTracker.notif.title',
+    textKey: 'flightTracker.notif.statusChanged',
+    textKeyFor: p => p.changeKey || 'flightTracker.notif.statusChanged',
+    navigateTextKey: 'flightTracker.notif.action',
+    navigateTarget: p => (p.tripId ? `/trips/${p.tripId}` : null),
+  },
 };
 
 // ── Fallback config for unknown event types ────────────────────────────────
@@ -228,6 +246,8 @@ export async function send(payload: NotificationPayload): Promise<void> {
 
   // Build navigate target (used by email/webhook CTA and in-app navigate)
   const navigateTarget = inApp?.navigateTarget ?? config.navigateTarget(params);
+  // The body key can depend on the params (see EventNotifConfig.textKeyFor).
+  const textKey = config.textKeyFor?.(params) || config.textKey;
   const fullLink = navigateTarget ? `${appUrl}${navigateTarget}` : undefined;
 
   // Fetch sender info once for in-app WS payloads
@@ -255,7 +275,7 @@ export async function send(payload: NotificationPayload): Promise<void> {
           event_type: event,
           title_key: config.titleKey,
           title_params: params,
-          text_key: config.textKey,
+          text_key: textKey,
           text_params: params,
           positive_text_key: inApp.positiveTextKey ?? 'notif.action.accept',
           negative_text_key: inApp.negativeTextKey ?? 'notif.action.decline',
@@ -271,7 +291,7 @@ export async function send(payload: NotificationPayload): Promise<void> {
           event_type: event,
           title_key: config.titleKey,
           title_params: params,
-          text_key: config.textKey,
+          text_key: textKey,
           text_params: params,
           navigate_text_key: config.navigateTextKey ?? 'notif.action.view',
           navigate_target: navigateTarget,
@@ -285,7 +305,7 @@ export async function send(payload: NotificationPayload): Promise<void> {
           event_type: event,
           title_key: config.titleKey,
           title_params: params,
-          text_key: config.textKey,
+          text_key: textKey,
           text_params: params,
         };
       }

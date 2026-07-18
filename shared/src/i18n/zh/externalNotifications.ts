@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const zh: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const zh: NotificationLocale = {
       body: '您的 Synology 账户或 URL 已更改，您已退出 Synology Photos。',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: '重置您的密码',

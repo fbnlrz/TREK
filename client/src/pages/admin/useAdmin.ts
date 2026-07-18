@@ -36,6 +36,14 @@ export function useAdmin() {
   const [bagTrackingEnabled, setBagTrackingEnabled] = useState<boolean>(false)
   useEffect(() => { adminApi.getBagTracking().then(d => setBagTrackingEnabled(d.enabled)).catch(() => {}) }, [])
 
+  // Flight tracker (AeroDataBox). The server never returns the key itself, only
+  // whether one is set, so the input is a write-only draft that is cleared again
+  // after a successful save.
+  const [flightTrackerHasKey, setFlightTrackerHasKey] = useState<boolean>(false)
+  const [aerodataboxKey, setAerodataboxKey] = useState<string>('')
+  const [savingAerodataboxKey, setSavingAerodataboxKey] = useState<boolean>(false)
+  useEffect(() => { adminApi.getFlightTracker().then(d => setFlightTrackerHasKey(Boolean(d.hasKey))).catch(() => {}) }, [])
+
   // Places photos
   const [placesPhotosEnabled, setPlacesPhotosEnabledState] = useState<boolean>(true)
   useEffect(() => { adminApi.getPlacesPhotos().then(d => setPlacesPhotosEnabledState(d.enabled)).catch(() => {}) }, [])
@@ -232,6 +240,21 @@ export function useAdmin() {
     }
   }
 
+  /** Save (or, with an empty string, remove) the AeroDataBox key. */
+  const handleSaveAerodataboxKey = async (key: string) => {
+    setSavingAerodataboxKey(true)
+    try {
+      const res = await adminApi.updateFlightTracker(key)
+      setFlightTrackerHasKey(Boolean(res?.hasKey))
+      setAerodataboxKey('')
+      toast.success(key.trim() ? t('flightTracker.admin.keySaved') : t('flightTracker.admin.keyCleared'))
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, t('flightTracker.admin.keySaveError')))
+    } finally {
+      setSavingAerodataboxKey(false)
+    }
+  }
+
   const handleValidateKeys = async () => {
     setValidating({ maps: true, weather: true })
     try {
@@ -383,11 +406,12 @@ export function useAdmin() {
     smtpValues, setSmtpValues, smtpLoaded,
     mapsKey, setMapsKey, weatherKey, setWeatherKey, unsplashKey, setUnsplashKey,
     showKeys, setShowKeys, savingKeys, validating, validation,
+    flightTrackerHasKey, aerodataboxKey, setAerodataboxKey, savingAerodataboxKey,
     updateInfo, setUpdateInfo, showUpdateModal, setShowUpdateModal,
     showRotateJwtModal, setShowRotateJwtModal, rotatingJwt, setRotatingJwt,
     // handlers
     loadData, loadAppConfig, loadApiKeys, handleToggleAuthSetting, handleToggleRequireMfa,
-    toggleKey, handleSaveApiKeys, handleValidateKeys, handleValidateKey,
+    toggleKey, handleSaveApiKeys, handleValidateKeys, handleValidateKey, handleSaveAerodataboxKey,
     handleCreateUser, handleCreateInvite, handleDeleteInvite, copyInviteLink,
     handleEditUser, handleSaveUser, handleDeleteUser,
   }

@@ -12,6 +12,11 @@ import type mapboxgl from 'mapbox-gl'
 import { Plane, Train, Ship, Car, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront } from 'lucide-react'
 import { getTransitMapSegments } from './transitGeometry'
 import { geodesicArcs } from './flightGeodesy'
+import {
+  LIVE_FLIGHT_COLOR, LIVE_REMAINING_COLOR,
+  createFlightStatusPoller, mapLiveLegsToSegments, planeMarkerHtml, splitArcAtPosition,
+  type LiveFlightLeg,
+} from './liveFlights'
 import { escapeHtml } from '@trek/shared'
 import type { Reservation, ReservationEndpoint } from '../../types'
 
@@ -90,13 +95,23 @@ function computeDuration(from: ReservationEndpoint, to: ReservationEndpoint, fal
 const cleanName = (name: string) => name.replace(/\s*\([^)]*\)/g, '').trim()
 
 // ── item building ─────────────────────────────────────────────────────────
+/**
+ * One drawable polyline plus the waypoint segment (waypoint i → i+1) it came
+ * from — the segment index lets the live-flight overlay replace exactly the
+ * arc an airborne leg belongs to. Mirrors `LegArc` in ReservationOverlay.tsx.
+ */
+interface LegArc {
+  segment: number
+  coords: [number, number][]
+}
+
 interface TransportItem {
   res: Reservation
   from: ReservationEndpoint
   to: ReservationEndpoint
   waypoints: ReservationEndpoint[]
   type: TransportType
-  arcs: [number, number][][]
+  arcs: LegArc[]
   primaryArc: [number, number][]
   mainLabel: string | null
   subLabel: string | null
@@ -117,7 +132,7 @@ function buildItems(reservations: Reservation[]): TransportItem[] {
     const type = r.type as TransportType
     const isGeo = TYPE_META[type].geodesic
     // One arc per leg (between consecutive waypoints), concatenated.
-    const arcs: [number, number][][] = []
+    const arcs: LegArc[] = []
     let distanceKm = 0
     for (let i = 0; i < waypoints.length - 1; i++) {
       const a = waypoints[i]
@@ -128,11 +143,11 @@ function buildItems(reservations: Reservation[]): TransportItem[] {
         // coincide with the wrapped copy and double the line opacity).
         ? geodesicArcs([a.lat, a.lng], [b.lat, b.lng], false)
         : [[[a.lat, a.lng], [b.lat, b.lng]] as [number, number][]]
-      arcs.push(...segArcs)
+      arcs.push(...segArcs.map(coords => ({ segment: i, coords })))
       distanceKm += haversineKm([a.lat, a.lng], [b.lat, b.lng])
     }
-    const primaryIdx = arcs.reduce((best, seg, idx, all) => seg.length > all[best].length ? idx : best, 0)
-    const primaryArc = arcs[primaryIdx] ?? []
+    const primaryIdx = arcs.reduce((best, seg, idx, all) => seg.coords.length > all[best].coords.length ? idx : best, 0)
+    const primaryArc = arcs[primaryIdx]?.coords ?? []
     const duration = computeDuration(from, to, r.reservation_time || null, r.reservation_end_time || null)
     const distance = `${Math.round(distanceKm)} km`
     const mainLabel = waypoints.every(w => w.code)
@@ -210,6 +225,12 @@ export class ReservationMapboxOverlay {
   private statsMarkers: { marker: GlMarker; arc: [number, number][] }[] = []
   private rerender: () => void
   private destroyed = false
+  // Live flights (flight bookings only) — one poller per trip, torn down with
+  // the overlay. See liveFlights.ts.
+  private liveLegs: LiveFlightLeg[] = []
+  private liveTripId: number | null = null
+  private stopPolling: (() => void) | null = null
+  private planeMarkers: GlMarker[] = []
 
   constructor(map: mapboxgl.Map, opts: ReservationOverlayOptions, MarkerCtor: MarkerConstructor) {
     this.map = map
@@ -226,11 +247,17 @@ export class ReservationMapboxOverlay {
     this.opts = opts
     this.items = buildItems(reservations)
     this.roadRoutes = roadRoutes ?? new Map()
+    this.syncLivePolling()
     this.render()
   }
 
   destroy() {
     this.destroyed = true
+    this.stopPolling?.()
+    this.stopPolling = null
+    this.liveTripId = null
+    this.planeMarkers.forEach(m => m.remove())
+    this.planeMarkers = []
     this.map.off('zoomend', this.rerender)
     this.map.off('moveend', this.rerender)
     this.map.off('render', this.updateStatsRotation)
@@ -242,6 +269,48 @@ export class ReservationMapboxOverlay {
       if (this.map.getLayer(RESERVATION_LINE_LAYER_ID)) this.map.removeLayer(RESERVATION_LINE_LAYER_ID)
       if (this.map.getSource(RESERVATION_SOURCE_ID)) this.map.removeSource(RESERVATION_SOURCE_ID)
     } catch { /* map already gone */ }
+  }
+
+  /**
+   * Start (or stop) the flight-status poll for whatever trip the current
+   * bookings belong to. Every reservation on a trip map is from the same trip,
+   * so the id comes straight off the first flight booking; with no flight on
+   * the map there is nothing to track.
+   */
+  private syncLivePolling() {
+    const flight = this.items.find(item => item.type === 'flight')
+    const tripId = typeof flight?.res.trip_id === 'number' ? flight.res.trip_id : null
+    if (tripId === this.liveTripId) return
+    this.stopPolling?.()
+    this.stopPolling = null
+    this.liveTripId = tripId
+    this.liveLegs = []
+    if (tripId == null) return
+    this.stopPolling = createFlightStatusPoller(tripId, legs => {
+      if (this.destroyed) return
+      this.liveLegs = legs
+      this.render()
+    })
+  }
+
+  /** reservation id → waypoint segment index → airborne leg. */
+  private liveSegments(items: TransportItem[]): Map<number, Map<number, LiveFlightLeg>> {
+    const out = new Map<number, Map<number, LiveFlightLeg>>()
+    if (this.liveLegs.length === 0) return out
+    const byRes = new Map<number, LiveFlightLeg[]>()
+    for (const leg of this.liveLegs) {
+      const list = byRes.get(leg.reservationId)
+      if (list) list.push(leg)
+      else byRes.set(leg.reservationId, [leg])
+    }
+    for (const item of items) {
+      if (item.type !== 'flight') continue
+      const legs = byRes.get(item.res.id)
+      if (!legs?.length) continue
+      const segments = mapLiveLegsToSegments(item.waypoints.map(w => w.code), legs)
+      if (segments.size > 0) out.set(item.res.id, segments)
+    }
+    return out
   }
 
   private setupLayer() {
@@ -263,10 +332,23 @@ export class ReservationMapboxOverlay {
       source: RESERVATION_SOURCE_ID,
       paint: {
         'line-color': ['coalesce', ['get', 'color'], TRANSPORT_COLOR] as any,
-        'line-width': ['case', ['==', ['get', 'transitPath'], true], ['case', ['==', ['get', 'walk'], true], 3, 3.5], 2.5] as any,
+        // Live flight legs come first: the flown part draws a touch heavier
+        // than a normal arc, the remaining part matches it but dashed.
+        'line-width': ['case',
+          ['==', ['get', 'live'], 'flown'], 3,
+          ['==', ['get', 'transitPath'], true], ['case', ['==', ['get', 'walk'], true], 3, 3.5],
+          2.5] as any,
         // Confirmed = solid + 0.75; pending = dashed + 0.55; walks always dotted.
-        'line-opacity': ['case', ['==', ['get', 'transitPath'], true], 0.95, ['case', ['==', ['get', 'status'], 'confirmed'], 0.75, 0.55]] as any,
-        'line-dasharray': ['case', ['==', ['get', 'walk'], true], ['literal', [0.1, 2.5]], ['case', ['==', ['get', 'status'], 'confirmed'], ['literal', [1, 0]], ['literal', [3, 3]]]] as any,
+        'line-opacity': ['case',
+          ['==', ['get', 'live'], 'flown'], 0.9,
+          ['==', ['get', 'live'], 'remaining'], 0.7,
+          ['==', ['get', 'transitPath'], true], 0.95,
+          ['case', ['==', ['get', 'status'], 'confirmed'], 0.75, 0.55]] as any,
+        'line-dasharray': ['case',
+          ['==', ['get', 'live'], 'remaining'], ['literal', [2, 2.5]],
+          ['==', ['get', 'live'], 'flown'], ['literal', [1, 0]],
+          ['==', ['get', 'walk'], true], ['literal', [0.1, 2.5]],
+          ['case', ['==', ['get', 'status'], 'confirmed'], ['literal', [1, 0]], ['literal', [3, 3]]]] as any,
       },
       layout: { 'line-cap': 'round', 'line-join': 'round' },
     })
@@ -309,6 +391,7 @@ export class ReservationMapboxOverlay {
     }
 
     // ── line features ───────────────────────────────────────────────
+    const liveByReservation = show ? this.liveSegments(visibleItems) : new Map<number, Map<number, LiveFlightLeg>>()
     const features = visibleItems.flatMap(item => {
       const transitSegs = item.type === 'transit' ? getTransitMapSegments(item.res) : []
       if (transitSegs.length > 0) {
@@ -320,6 +403,7 @@ export class ReservationMapboxOverlay {
             status: item.res.status ?? 'pending',
             transitPath: true,
             walk: seg.walk,
+            live: null,
             color: seg.walk ? '#64748b' : (seg.color || '#7c3aed'),
           },
           geometry: {
@@ -330,8 +414,9 @@ export class ReservationMapboxOverlay {
       }
       // Prefer the real road route (car/bus/taxi/bicycle) over the straight arc.
       const road = this.roadRoutes.get(item.res.id)
-      const lines = road && road.length >= 2 ? [road] : item.arcs
-      return lines.map(seg => ({
+      const lines: LegArc[] = road && road.length >= 2 ? [{ segment: -1, coords: road }] : item.arcs
+      const live = liveByReservation.get(item.res.id)
+      const lineFeature = (coords: [number, number][], liveKind: string | null, color: string | null) => ({
         type: 'Feature' as const,
         properties: {
           resId: item.res.id,
@@ -339,13 +424,24 @@ export class ReservationMapboxOverlay {
           status: item.res.status ?? 'pending',
           transitPath: false,
           walk: false,
-          color: null as string | null,
+          live: liveKind,
+          color,
         },
         geometry: {
           type: 'LineString' as const,
-          coordinates: seg.map(([lat, lng]) => [lng, lat]),
+          coordinates: coords.map(([lat, lng]) => [lng, lat]),
         },
-      }))
+      })
+      return lines.flatMap(seg => {
+        // An airborne leg replaces its own arc with a flown/remaining pair.
+        const leg = live?.get(seg.segment)
+        const split = leg ? splitArcAtPosition(seg.coords, leg.position) : null
+        if (!split) return [lineFeature(seg.coords, null, null)]
+        const out = []
+        if (split.remaining.length >= 2) out.push(lineFeature(split.remaining, 'remaining', LIVE_REMAINING_COLOR))
+        if (split.flown.length >= 2) out.push(lineFeature(split.flown, 'flown', LIVE_FLIGHT_COLOR))
+        return out
+      })
     })
     const src = map.getSource(RESERVATION_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined
     src?.setData({ type: 'FeatureCollection', features })
@@ -374,6 +470,29 @@ export class ReservationMapboxOverlay {
             .addTo(map)
           this.endpointMarkers.push(marker)
         }
+      }
+    }
+
+    // ── live aircraft markers ───────────────────────────────────────
+    this.planeMarkers.forEach(m => m.remove())
+    this.planeMarkers = []
+    for (const [resId, segments] of liveByReservation) {
+      for (const leg of segments.values()) {
+        const el = document.createElement('div')
+        el.innerHTML = planeMarkerHtml(leg.track, leg.label)
+        const node = (el.firstElementChild as HTMLElement | null) ?? el
+        node.title = leg.label
+        node.style.cursor = 'pointer'
+        if (this.opts.onEndpointClick) {
+          node.addEventListener('click', ev => {
+            ev.stopPropagation()
+            this.opts.onEndpointClick?.(resId)
+          })
+        }
+        const marker = new this.MarkerCtor({ element: node, anchor: 'center' })
+          .setLngLat([leg.position[1], leg.position[0]])
+          .addTo(map)
+        this.planeMarkers.push(marker)
       }
     }
 

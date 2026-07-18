@@ -1,4 +1,6 @@
 import type { NotificationLocale } from '../externalNotifications/types';
+import { flightStatusEventText } from '../externalNotifications/flightStatus';
+import flightTracker from './flightTracker';
 
 const zhTW: NotificationLocale = {
   email: {
@@ -53,6 +55,7 @@ const zhTW: NotificationLocale = {
       body: '您的 Synology 帳戶或 URL 已變更，您已登出 Synology Photos。',
     }),
     plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
+    flight_status_change: flightStatusEventText(flightTracker),
   },
   passwordReset: {
     subject: '重設您的密碼',

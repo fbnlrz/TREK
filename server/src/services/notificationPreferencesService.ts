@@ -31,7 +31,8 @@ export type NotifEventType =
   | 'packing_tagged'
   | 'version_available'
   | 'synology_session_cleared'
-  | 'plugin_notification';
+  | 'plugin_notification'
+  | 'flight_status_change';
 
 /** Every event, in the order the preferences UI lists them. */
 export const ALL_EVENT_TYPES: NotifEventType[] = [
@@ -47,6 +48,7 @@ export const ALL_EVENT_TYPES: NotifEventType[] = [
   'version_available',
   'synology_session_cleared',
   'plugin_notification',
+  'flight_status_change',
 ];
 
 /** One channel column in the preferences matrix. */
